@@ -1,0 +1,12 @@
+app:
+  listen: 0.0.0.0:80
+  auth:
+    username: admin
+    password: admin
+
+providers:
+  - domain: example.com
+    provider: aliyun
+    config:
+      access_key_id: replace_with_your_access_key_id
+      access_key_secret: replace_with_your_access_key_secret
