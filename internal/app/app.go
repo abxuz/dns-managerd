@@ -83,6 +83,14 @@ func (a *app) Init(ctx context.Context) error {
 		return err
 	}
 	service.Config.SetCachedConfig(cfg)
+
+	for _, c := range cfg.Providers {
+		err = service.Provider.SetProvider(c)
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
