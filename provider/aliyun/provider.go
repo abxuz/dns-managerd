@@ -1,7 +1,7 @@
 package aliyun
 
 import (
-	"github.com/xbugio/dns-manager/provider"
+	"github.com/abxuz/dns-manager/provider"
 
 	alidns "github.com/alibabacloud-go/alidns-20150109/v4/client"
 	openapi "github.com/alibabacloud-go/darabonba-openapi/v2/client"

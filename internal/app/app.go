@@ -1,54 +1,129 @@
 package app
 
 import (
-	"fmt"
-	"io/fs"
+	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"io"
+	"log"
+	"net/http"
+	"os"
 
-	"github.com/xbugio/dns-manager/internal/config"
-	"github.com/xbugio/dns-manager/provider"
-	_ "github.com/xbugio/dns-manager/provider/aliyun"
+	"github.com/abxuz/dns-manager/assets"
+	"github.com/abxuz/dns-manager/fs"
+	"github.com/abxuz/dns-manager/internal/api"
+	"github.com/abxuz/dns-manager/internal/dao"
+	"github.com/abxuz/dns-manager/internal/middleware"
+	"github.com/abxuz/dns-manager/internal/model"
+	"github.com/abxuz/dns-manager/internal/service"
+	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+
+	// providers initial
+	_ "github.com/abxuz/dns-manager/provider/aliyun"
+
+	etcd "go.etcd.io/etcd/client/v3"
 )
 
-type ProviderWithName struct {
-	Name string
-	provider.Provider
+var App = app{}
+
+type app struct {
+	flag *model.Flag
 }
 
-type App struct {
-	cfg       *config.Config
-	htmlFs    fs.FS
-	providers map[string]*ProviderWithName
+func (a *app) SetFlag(f *model.Flag) {
+	a.flag = f
 }
 
-func New(cfg *config.Config, htmlFs fs.FS) *App {
-	return &App{
-		cfg:       cfg,
-		htmlFs:    htmlFs,
-		providers: make(map[string]*ProviderWithName),
+func (a *app) Init(ctx context.Context) error {
+	switch a.flag.Storage {
+	case "local":
+		service.Config.SetPath(a.flag.LocalConfig)
+		service.Config.SetStorage(dao.Local)
+	case "etcd":
+		etcdCfg := etcd.Config{
+			Endpoints:   a.flag.EtcdEndpoints,
+			TLS:         &tls.Config{},
+			Context:     ctx,
+			DialOptions: []grpc.DialOption{grpc.WithBlock()},
+			Username:    a.flag.EtcdUsername,
+			Password:    a.flag.EtcdPassword,
+			Logger:      zap.NewNop(),
+		}
+
+		if a.flag.EtcdCA != "" {
+			data, err := os.ReadFile(a.flag.EtcdCA)
+			if err != nil {
+				return err
+			}
+			etcdCfg.TLS.RootCAs = x509.NewCertPool()
+			etcdCfg.TLS.RootCAs.AppendCertsFromPEM(data)
+		}
+
+		if a.flag.EtcdCert != "" {
+			cert, err := tls.LoadX509KeyPair(a.flag.EtcdCert, a.flag.EtcdKey)
+			if err != nil {
+				return err
+			}
+			etcdCfg.TLS.Certificates = []tls.Certificate{cert}
+		}
+
+		client, err := etcd.New(etcdCfg)
+		if err != nil {
+			return err
+		}
+		dao.Etcd.SetClient(client)
+		service.Config.SetPath(a.flag.EtcdConfigKey)
+		service.Config.SetStorage(dao.Etcd)
 	}
-}
 
-func (app *App) Run() error {
-	if err := app.loadProviders(); err != nil {
+	cfg, err := service.Config.GetConfig(ctx)
+	if err != nil {
 		return err
 	}
-	return app.serveApi()
+	service.Config.SetCachedConfig(cfg)
+	return nil
 }
 
-func (app *App) loadProviders() error {
-	for _, cfg := range app.cfg.Providers {
-		factory, ok := provider.GetProviderFactory(cfg.Provider)
-		if !ok {
-			return fmt.Errorf("provider %v not found", cfg.Provider)
-		}
-		provider, err := factory.NewProvider(cfg.Domain, cfg.Config)
-		if err != nil {
-			return fmt.Errorf("failed to create provider, error: %v", err.Error())
-		}
-		app.providers[cfg.Domain] = &ProviderWithName{
-			Name:     cfg.Provider,
-			Provider: provider,
+func (a *app) Run(ctx context.Context) error {
+	if err := a.Init(ctx); err != nil {
+		return err
+	}
+
+	cfg := service.Config.GetCachedConfig()
+
+	gin.SetMode(gin.ReleaseMode)
+
+	router := gin.New()
+	router.Use(gin.RecoveryWithWriter(io.Discard))
+	router.Use(middleware.Api.BasicAuth)
+
+	v1 := router.Group("/api/v1/")
+	v1.Use(middleware.Api.ApiResponse)
+
+	{
+		v1.GET("/domain", api.Domain.List)
+
+		g := v1.Group("/domain/:domain")
+		{
+			g.GET("/record", api.Record.List)
+			g.GET("/record/:id", api.Record.Get)
+			g.POST("/record", api.Record.Add)
+			g.DELETE("/record/:id", api.Record.Delete)
+			g.PATCH("/record", api.Record.Update)
 		}
 	}
-	return nil
+
+	fileserver := http.FileServer(&fs.NoAutoIndexFileSystem{
+		FileSystem: http.FS(assets.HtmlFs()),
+	})
+	router.NoRoute(gin.WrapH(fileserver))
+
+	server := &http.Server{
+		Addr:     cfg.App.Listen,
+		Handler:  router,
+		ErrorLog: log.New(io.Discard, "", log.LstdFlags),
+	}
+	return server.ListenAndServe()
 }
