@@ -73,6 +73,10 @@ func (a *app) Init(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		// important, 目前的需求只有读完config就关，dao.Etcd就不可再调用了。
+		// 后续有变化的话要注意这个
+		defer client.Close()
+
 		dao.Etcd.SetClient(client)
 		service.Config.SetPath(a.flag.EtcdConfigKey)
 		service.Config.SetStorage(dao.Etcd)
