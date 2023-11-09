@@ -1,6 +1,8 @@
 package aliyun
 
 import (
+	"strings"
+
 	"github.com/abxuz/dns-manager/provider"
 
 	alidns "github.com/alibabacloud-go/alidns-20150109/v4/client"
@@ -97,7 +99,7 @@ func (p *Provider) ModifyRecord(record *provider.Record) error {
 	}
 
 	_, err := p.api.UpdateDomainRecord(request)
-	if err != nil {
+	if err != nil && !strings.Contains(err.Error(), "DomainRecordDuplicate") {
 		return err
 	}
 
