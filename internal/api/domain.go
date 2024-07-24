@@ -3,20 +3,21 @@ package api
 import (
 	"sort"
 
+	"github.com/abxuz/dns-manager/internal/dao"
 	"github.com/abxuz/dns-manager/internal/model"
-	"github.com/abxuz/dns-manager/internal/service"
 	"github.com/gin-gonic/gin"
 )
 
 var Domain = &aDomain{}
 
 type aDomain struct {
+	baseApi
 }
 
 func (a *aDomain) List(c *gin.Context) {
 	list := make([]*model.Domain, 0)
 
-	cfg := service.Config.GetCachedConfig()
+	cfg := dao.Config.Cfg()
 	for _, p := range cfg.Providers {
 		list = append(list, &model.Domain{
 			Domain:   p.Domain,
@@ -26,5 +27,6 @@ func (a *aDomain) List(c *gin.Context) {
 	sort.Slice(list, func(i, j int) bool {
 		return list[i].Domain < list[j].Domain
 	})
-	c.Set("data", list)
+
+	a.Success(c, list)
 }

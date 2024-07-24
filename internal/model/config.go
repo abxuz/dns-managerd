@@ -49,7 +49,7 @@ func (c *Config) CheckValid() error {
 		return fmt.Errorf("app listen config missing")
 	}
 
-	domains := bset.NewSetString()
+	domains := bset.New[string]()
 	for _, cfg := range c.Providers {
 		if err := cfg.CheckValid(); err != nil {
 			return err

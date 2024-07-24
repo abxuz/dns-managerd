@@ -11,6 +11,7 @@ import (
 var Record = &aRecord{}
 
 type aRecord struct {
+	baseApi
 }
 
 func (a *aRecord) List(c *gin.Context) {
@@ -18,22 +19,22 @@ func (a *aRecord) List(c *gin.Context) {
 
 	page := provider.Page{}
 	if err := c.ShouldBindQuery(&page); err != nil {
-		c.Error(err)
+		a.Error(c, err.Error())
 		return
 	}
 
 	provider, ok := service.Provider.GetProvider(domain)
 	if !ok {
-		c.Error(fmt.Errorf("domain %v not configured", domain))
+		a.Error(c, fmt.Sprintf("domain %v not configured", domain))
 		return
 	}
 
 	list, total, err := provider.ListRecords(page)
 	if err != nil {
-		c.Error(err)
+		a.Error(c, err.Error())
 		return
 	}
-	c.Set("data", gin.H{"list": list, "total": total})
+	a.Success(c, gin.H{"list": list, "total": total})
 }
 
 func (a *aRecord) Get(c *gin.Context) {
@@ -42,16 +43,16 @@ func (a *aRecord) Get(c *gin.Context) {
 
 	provider, ok := service.Provider.GetProvider(domain)
 	if !ok {
-		c.Error(fmt.Errorf("domain %v not configured", domain))
+		a.Error(c, fmt.Sprintf("domain %v not configured", domain))
 		return
 	}
 
 	data, err := provider.GetRecord(id)
 	if err != nil {
-		c.Error(err)
+		a.Error(c, err.Error())
 		return
 	}
-	c.Set("data", data)
+	a.Success(c, data)
 }
 
 func (a *aRecord) Add(c *gin.Context) {
@@ -59,20 +60,21 @@ func (a *aRecord) Add(c *gin.Context) {
 
 	data := &provider.Record{}
 	if err := c.ShouldBindJSON(data); err != nil {
-		c.Error(err)
+		a.Error(c, err.Error())
 		return
 	}
 
 	provider, ok := service.Provider.GetProvider(domain)
 	if !ok {
-		c.Error(fmt.Errorf("domain %v not configured", domain))
+		a.Error(c, fmt.Sprintf("domain %v not configured", domain))
 		return
 	}
 
 	if err := provider.AddRecord(data); err != nil {
-		c.Error(err)
+		a.Error(c, err.Error())
 		return
 	}
+	a.Success(c, nil)
 }
 
 func (a *aRecord) Delete(c *gin.Context) {
@@ -81,14 +83,15 @@ func (a *aRecord) Delete(c *gin.Context) {
 
 	provider, ok := service.Provider.GetProvider(domain)
 	if !ok {
-		c.Error(fmt.Errorf("domain %v not configured", domain))
+		a.Error(c, fmt.Sprintf("domain %v not configured", domain))
 		return
 	}
 
 	if err := provider.DeleteRecord(id); err != nil {
-		c.Error(err)
+		a.Error(c, err.Error())
 		return
 	}
+	a.Success(c, nil)
 }
 
 func (a *aRecord) Update(c *gin.Context) {
@@ -96,18 +99,19 @@ func (a *aRecord) Update(c *gin.Context) {
 
 	data := &provider.Record{}
 	if err := c.ShouldBindJSON(data); err != nil {
-		c.Error(err)
+		a.Error(c, err.Error())
 		return
 	}
 
 	provider, ok := service.Provider.GetProvider(domain)
 	if !ok {
-		c.Error(fmt.Errorf("domain %v not configured", domain))
+		a.Error(c, fmt.Sprintf("domain %v not configured", domain))
 		return
 	}
 
 	if err := provider.ModifyRecord(data); err != nil {
-		c.Error(err)
+		a.Error(c, err.Error())
 		return
 	}
+	a.Success(c, nil)
 }

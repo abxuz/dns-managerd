@@ -1,54 +1,82 @@
 package cmd
 
 import (
-	"context"
+	"net/http"
 	"os"
-	"os/signal"
 	"path/filepath"
-	"syscall"
 
+	"github.com/gin-gonic/gin"
 	"github.com/spf13/cobra"
 
-	"github.com/abxuz/dns-manager/internal/app"
-	"github.com/abxuz/dns-manager/internal/model"
+	"github.com/abxuz/b-tools/bhttp"
+	"github.com/abxuz/dns-manager/assets"
+	"github.com/abxuz/dns-manager/internal/api"
+	"github.com/abxuz/dns-manager/internal/dao"
+	"github.com/abxuz/dns-manager/internal/middleware"
+	"github.com/abxuz/dns-manager/internal/service"
+
+	// providers initial
+	_ "github.com/abxuz/dns-manager/provider/aliyun"
 )
 
-func NewCmd() *cobra.Command {
-	flag := &model.Flag{}
+func Must(err error) {
+	if err != nil {
+		panic(err)
+	}
+}
 
+func NewCmd() *cobra.Command {
+	var config string
 	c := &cobra.Command{
 		Use:   filepath.Base(os.Args[0]),
 		Short: "dns manager system",
 		Args:  cobra.OnlyValidArgs,
 		Run: func(cmd *cobra.Command, args []string) {
-			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+			Must(dao.Config.Init(config))
 
-			app.App.SetFlag(flag)
-			err := app.App.Run(ctx)
-			stop()
-
-			if err != nil {
-				cmd.PrintErrln(err)
-				os.Exit(1)
+			cfg := dao.Config.Cfg()
+			for _, c := range cfg.Providers {
+				Must(service.Provider.SetProvider(c))
 			}
+
+			gin.SetMode(gin.ReleaseMode)
+
+			g := gin.New()
+			g.Use(gin.Recovery())
+			if cfg.App.Auth != nil {
+				g.Use(middleware.BasicAuth(cfg.App.Auth.Username, cfg.App.Auth.Password))
+			}
+
+			v1 := g.Group("/api/v1/")
+			{
+				v1.GET("/domain", api.Domain.List)
+
+				g := v1.Group("/domain/:domain")
+				{
+					g.GET("/record", api.Record.List)
+					g.GET("/record/:id", api.Record.Get)
+					g.POST("/record", api.Record.Add)
+					g.DELETE("/record/:id", api.Record.Delete)
+					g.PATCH("/record", api.Record.Update)
+				}
+			}
+
+			fileserver := http.FileServer(&bhttp.NoAutoIndexFileSystem{
+				FileSystem: http.FS(assets.HtmlFs()),
+			})
+			g.NoRoute(gin.WrapH(fileserver))
+
+			server := &http.Server{
+				Addr:    cfg.App.Listen,
+				Handler: g,
+			}
+			Must(server.ListenAndServe())
 		},
 	}
 
 	flags := c.Flags()
-	flags.StringVar(&flag.Storage, "storage", "local", "storage type: local or etcd")
+	flags.StringVarP(&config, "config", "c", "config.yaml", "config file path")
+	c.MarkFlagFilename("config", "yaml", "yml")
 
-	flags.StringVar(&flag.LocalConfig, "local-config", "config.yaml", "local config file path [required for local storage]")
-	c.MarkFlagFilename("local-config", "yaml", "yml")
-
-	flags.StringArrayVar(&flag.EtcdEndpoints, "etcd-endpoints", nil, "etcd endpoints [required for etcd storage]")
-	flags.StringVar(&flag.EtcdConfigKey, "etcd-config-key", "", "etcd config key [required for etcd storage]")
-	flags.StringVar(&flag.EtcdCA, "etcd-ca", "ca.crt", "etcd ca cert path")
-	flags.StringVar(&flag.EtcdCert, "etcd-cert", "client.crt", "etcd client cert path")
-	flags.StringVar(&flag.EtcdKey, "etcd-key", "client.key", "etcd client key path")
-	flags.StringVar(&flag.EtcdUsername, "etcd-username", "", "etcd username")
-	flags.StringVar(&flag.EtcdPassword, "etcd-password", "", "etcd password")
-	c.MarkFlagFilename("etcd-ca", "crt", "pem")
-	c.MarkFlagFilename("etcd-cert", "crt", "pem")
-	c.MarkFlagFilename("etcd-key", "crt", "pem")
 	return c
 }
